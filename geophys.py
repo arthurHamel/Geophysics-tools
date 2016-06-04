@@ -20,12 +20,13 @@
  *                                                                         *
  ***************************************************************************/
 """
-from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
-from PyQt4.QtGui import QAction, QIcon
+from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QObject, SIGNAL
+from PyQt4.QtGui import QAction, QIcon, QComboBox
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
 from geophys_dialog import GeophysDialog
+from geophys_importData import GeophysImportData
 import os.path
 
 
@@ -60,6 +61,8 @@ class Geophys:
 
         # Create the dialog (after translation) and keep reference
         self.dlg = GeophysDialog()
+	
+	self.dlgImportData = GeophysImportData()
 
         # Declare instance attributes
         self.actions = []
@@ -67,6 +70,8 @@ class Geophys:
         # TODO: We are going to let the user set this up in a future iteration
         self.toolbar = self.iface.addToolBar(u'Geophys')
         self.toolbar.setObjectName(u'Geophys')
+	
+	
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -166,8 +171,22 @@ class Geophys:
             text=self.tr(u'Geophysics'),
             callback=self.run,
             parent=self.iface.mainWindow())
+	self.toolBar = self.iface.addToolBar("MY TOOLBAR tools")
+	self.toolBar.setObjectName("MY TOOLBAR tools")
 
+	self.importData = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Download data"), self.iface.mainWindow())
+	self.assemble = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Assemble"), self.iface.mainWindow())
+	self.process = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Process"), self.iface.mainWindow())
 
+	self.toolBar.addAction(self.importData)
+        self.toolBar.addAction(self.assemble)
+        self.toolBar.addAction(self.process)
+	
+	QObject.connect(self.importData, SIGNAL("triggered()"), self.runImport)
+        QObject.connect(self.assemble, SIGNAL("triggered()"), self.runAssemble)
+        QObject.connect(self.process, SIGNAL("triggered()"), self.runProcess)
+	
+	
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
@@ -177,7 +196,47 @@ class Geophys:
             self.iface.removeToolBarIcon(action)
         # remove the toolbar
         del self.toolbar
+	
+    def refreshDevice(self):
+        import serial.tools.list_ports
+	listCOM= list(serial.tools.list_ports.comports())
+	
+	if not listCOM:
+		self.portCom=""
+		self.dlgImportData.deviceStatus.setText("No device connected")	
+	else:
+		com, desc, hwid = listCOM[0]
+		self.dlgImportData.deviceStatus.setText("Connected: %s" %desc)
+		self.portCom=com
+		
+    def acceptImport(self):
+	self.refreshDevice()
+	if (os.path.isdir(self.dlgImportData.warning.text())):
+		self.dlgImportData.warning.setText("Valid directory.")
+		if (self.portCom!=""):
+			self.dlgImportData.warning.setText("Offwego")
 
+	else: 
+		self.dlgImportData.warning.setText("Warning: directory is not valid.")
+		
+		
+    def runImport(self):
+	self.portCom=""
+	self.refreshDevice()
+	self.dlgImportData.warning.setText("")
+	self.dlgImportData.refreshBtn.clicked.connect(self.refreshDevice)
+        self.dlgImportData.show()
+	
+	self.dlgImportData.buttonBox.clicked.connect(self.acceptImport)
+	self.dlgImportData.buttonBox.accepted.connect(self.acceptImport)
+	self.dlgImportData.buttonBox.rejected.connect(self.dlgImportData.close)
+	
+    def runAssemble(self):
+        self.dlgImportData.show()
+
+	
+    def runProcess(self):
+        self.dlgImportData.show()
 
     def run(self):
         """Run method that performs all the real work"""
