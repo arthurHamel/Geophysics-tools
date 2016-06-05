@@ -1,5 +1,8 @@
 <RCC>
     <qresource prefix="/plugins/Geophys" >
         <file>icon.png</file>
+	<file>icon_dl.png</file>
+	<file>icon_assemble.png</file>
+	<file>icon_process.png</file>
     </qresource>
 </RCC>

@@ -21,14 +21,15 @@
  ***************************************************************************/
 """
 from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QObject, SIGNAL
-from PyQt4.QtGui import QAction, QIcon, QComboBox
+from PyQt4.QtGui import QAction, QIcon, QComboBox, QFileDialog
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
 from geophys_dialog import GeophysDialog
 from geophys_importData import GeophysImportData
+from geophys_loadData import GeophysLoadData
 import os.path
-
+import time
 
 class Geophys:
     """QGIS Plugin Implementation."""
@@ -63,7 +64,8 @@ class Geophys:
         self.dlg = GeophysDialog()
 	
 	self.dlgImportData = GeophysImportData()
-
+	self.dlgLoadData = GeophysLoadData()
+	
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&Geophysics survey')
@@ -165,18 +167,11 @@ class Geophys:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
-        icon_path = ':/plugins/Geophys/icon.png'
-        self.add_action(
-            icon_path,
-            text=self.tr(u'Geophysics'),
-            callback=self.run,
-            parent=self.iface.mainWindow())
-	self.toolBar = self.iface.addToolBar("MY TOOLBAR tools")
-	self.toolBar.setObjectName("MY TOOLBAR tools")
-
-	self.importData = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Download data"), self.iface.mainWindow())
-	self.assemble = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Assemble"), self.iface.mainWindow())
-	self.process = QAction(QIcon(":/plugins/Myplugintoolbar/icon.png"), QCoreApplication.translate("IMPRESStoolbar", "Process"), self.iface.mainWindow())
+	self.toolBar = self.iface.addToolBar("Geophysics tools")
+	self.toolBar.setObjectName("Geophysics tools")
+	self.importData = QAction(QIcon(':/plugins/Geophys/icon_dl.png'), QCoreApplication.translate("IMPRESStoolbar", "Download data"), self.iface.mainWindow())
+	self.assemble = QAction(QIcon(':/plugins/Geophys/icon_assemble.png'), QCoreApplication.translate("IMPRESStoolbar", "Assemble"), self.iface.mainWindow())
+	self.process = QAction(QIcon(':/plugins/Geophys/icon_process.png'), QCoreApplication.translate("IMPRESStoolbar", "Process"), self.iface.mainWindow())
 
 	self.toolBar.addAction(self.importData)
         self.toolBar.addAction(self.assemble)
@@ -208,14 +203,114 @@ class Geophys:
 		com, desc, hwid = listCOM[0]
 		self.dlgImportData.deviceStatus.setText("Connected: %s" %desc)
 		self.portCom=com
+		self.serDesc=desc
+		
+		
+    def downloadRM85(self,com,output,init):
+	import os.path
+	import serial
+	import numpy as np
+	self.dlgLoadData.deviceStatus.setText(self.serDesc)
+	self.dlgLoadData.outButton.setText("Cancel")
+	self.dlgLoadData.outButton.clicked.connect(self.dlgLoadData.close)
+	self.dlgLoadData.status.setText("Ready. Press <<Download>> on device.")
+	try:
+		ser = serial.Serial(com, 9600, timeout=1) #Tried with and without the last 3 parameters, and also at 1Mbps, same happens.
+		ser.flushInput()
+		ser.flushOutput()
+	except:
+		self.dlgLoadData.status.setText("Connection error.")
+		
+
+	overwrite="na"
+	started = 0
+	ii=init-1
+	data_raw=""
+	while True:
+		bytesToRead = ser.readline()
+		if (bytesToRead!=""):
+			started=1
+			ii+=1
+			if (ii<10):
+				countStr=str("0%s" %ii)
+			else: 
+				countStr=ii
+			matrix=np.empty([20,20])
+			self.dlgLoadData.progressBar.setValue(0)
+			for x in range (0,20):
+				self.dlgLoadData.deviceStatus.setText("Loading data: Grid %s\tLine%s" %(ii,(x+1)))
+				line=""
+				for y in range (0,20):
+					
+					if (x==0 and y==0):
+						dataline=str(bytesToRead)
+					else:
+						dataline=str(ser.readline())
+					metadataline=str(ser.readline())
+					if ("4095" in dataline):  
+						value="0"
+					elif ("4094" in dataline):
+						value="0.01"
+					else:
+						if ('11' in metadataline):
+							value=int(dataline.strip())*10
+						else:
+							value=int(dataline.strip())
+						value=value/float(255)
+						value= round(value, 2)#convert to resistance values
+					if (x%2!=0):#Zigzag mode
+						matrix[19-y][x]=value
+					else:
+						matrix[y][x]=value
+				self.dlgLoadData.progressBar.setValue(5*(x+1))
+
+		#### Writing file. Checking whether the file already exists ####
+			fname='%s\grid_%s.csv' %(pathCsv,countStr)
+			if (os.path.isfile(fname) and overwrite=="ask"):
+				while True:
+					overwrite=raw_input('\nGrid already downloaded. Overwite?\n YA:Yes for all\n Y:Yes\n N: Not this one\n NA: Only add new grids\n').lower()
+					if (overwrite=="y" or overwrite=="ya"):
+						fileout= open(fname, 'wb')
+						fileout.write(datafiltered)
+						fileout.close()
+						sys.stdout.write(" Existed (Overwritten)")
+						break
+					elif (overwrite=="n" or overwrite=="na"):
+						sys.stdout.write(" Existed (Not Overwritten)")
+						break
+				if (overwrite=="y" or overwrite=="n"):
+					overwrite="ask"
+			elif (os.path.isfile(fname) and overwrite=="ya"):
+				fileout= open(fname, 'wb')
+				fileout.write(datafiltered)
+				fileout.close()
+				sys.stdout.write(" Existed (Overwritten)")
+			elif (os.path.isfile(fname) and overwrite=="na"):
+				sys.stdout.write(" File already exists. Not overwritten.")
+			else:
+				np.savetxt(fname, matrix, delimiter=",", fmt='%.2f')
+				sys.stdout.write(" Done")
+			sys.stdout.write("\n")
+			sys.stdout.flush()
+		if (started==1 and bytesToRead==''):
+			self.dlgLoadData.outButton.setText("Finished")
+			break
+	
+    def select_output(self):
+	foldername = QFileDialog.getExistingDirectory(self.dlgImportData, "Select output directory ","")
+	self.dlgImportData.lineEdit.setText(foldername)
 		
     def acceptImport(self):
 	self.refreshDevice()
-	if (os.path.isdir(self.dlgImportData.warning.text())):
+	if (os.path.isdir(self.dlgImportData.lineEdit.text())):
 		self.dlgImportData.warning.setText("Valid directory.")
+		self.downloadOutput=self.dlgImportData.lineEdit.text()
+		self.init=int(self.dlgImportData.firstGrid.value())
 		if (self.portCom!=""):
-			self.dlgImportData.warning.setText("Offwego")
-
+			self.dlgImportData.close()
+			self.dlgLoadData.show()
+			time.sleep(1)
+			self.downloadRM85(self.portCom,self.downloadOutput,self.init)
 	else: 
 		self.dlgImportData.warning.setText("Warning: directory is not valid.")
 		
@@ -224,8 +319,11 @@ class Geophys:
 	self.portCom=""
 	self.refreshDevice()
 	self.dlgImportData.warning.setText("")
+	self.dlgImportData.lineEdit.setText("")
 	self.dlgImportData.refreshBtn.clicked.connect(self.refreshDevice)
+	self.dlgImportData.selectFolderBtn.clicked.connect(self.select_output)
         self.dlgImportData.show()
+	
 	
 	self.dlgImportData.buttonBox.clicked.connect(self.acceptImport)
 	self.dlgImportData.buttonBox.accepted.connect(self.acceptImport)
