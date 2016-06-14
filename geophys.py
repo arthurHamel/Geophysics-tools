@@ -20,16 +20,16 @@
  *                                                                         *
  ***************************************************************************/
 """
-from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QObject, SIGNAL
-from PyQt4.QtGui import QAction, QIcon, QComboBox, QFileDialog
+from PyQt4.QtCore import *
+from PyQt4.QtGui import *
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
 from geophys_dialog import GeophysDialog
 from geophys_importData import GeophysImportData
-from geophys_loadData import GeophysLoadData
 import os.path
 import time
+import numpy as np
 
 class Geophys:
     """QGIS Plugin Implementation."""
@@ -61,10 +61,9 @@ class Geophys:
                 QCoreApplication.installTranslator(self.translator)
 
         # Create the dialog (after translation) and keep reference
-        self.dlg = GeophysDialog()
-	
+		self.dlg = GeophysDialog()
 	self.dlgImportData = GeophysImportData()
-	self.dlgLoadData = GeophysLoadData()
+	self.downloadOutput=""
 	
         # Declare instance attributes
         self.actions = []
@@ -73,7 +72,7 @@ class Geophys:
         self.toolbar = self.iface.addToolBar(u'Geophys')
         self.toolbar.setObjectName(u'Geophys')
 	
-	
+
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -174,12 +173,12 @@ class Geophys:
 	self.process = QAction(QIcon(':/plugins/Geophys/icon_process.png'), QCoreApplication.translate("IMPRESStoolbar", "Process"), self.iface.mainWindow())
 
 	self.toolBar.addAction(self.importData)
-        self.toolBar.addAction(self.assemble)
-        self.toolBar.addAction(self.process)
+	self.toolBar.addAction(self.assemble)
+	self.toolBar.addAction(self.process)
 	
 	QObject.connect(self.importData, SIGNAL("triggered()"), self.runImport)
-        QObject.connect(self.assemble, SIGNAL("triggered()"), self.runAssemble)
-        QObject.connect(self.process, SIGNAL("triggered()"), self.runProcess)
+	QObject.connect(self.assemble, SIGNAL("triggered()"), self.runAssemble)
+	QObject.connect(self.process, SIGNAL("triggered()"), self.runProcess)
 	
 	
     def unload(self):
@@ -192,142 +191,131 @@ class Geophys:
         # remove the toolbar
         del self.toolbar
 	
-    def refreshDevice(self):
-        import serial.tools.list_ports
-	listCOM= list(serial.tools.list_ports.comports())
 	
-	if not listCOM:
-		self.portCom=""
-		self.dlgImportData.deviceStatus.setText("No device connected")	
-	else:
-		com, desc, hwid = listCOM[0]
-		self.dlgImportData.deviceStatus.setText("Connected: %s" %desc)
-		self.portCom=com
-		self.serDesc=desc
-		
-		
-    def downloadRM85(self,com,output,init):
-	import os.path
-	import serial
-	import numpy as np
-	self.dlgLoadData.deviceStatus.setText(self.serDesc)
-	self.dlgLoadData.outButton.setText("Cancel")
-	self.dlgLoadData.outButton.clicked.connect(self.dlgLoadData.close)
-	self.dlgLoadData.status.setText("Ready. Press <<Download>> on device.")
-	try:
-		ser = serial.Serial(com, 9600, timeout=1) #Tried with and without the last 3 parameters, and also at 1Mbps, same happens.
-		ser.flushInput()
-		ser.flushOutput()
-	except:
-		self.dlgLoadData.status.setText("Connection error.")
-		
-
-	overwrite="na"
-	started = 0
-	ii=init-1
-	data_raw=""
-	while True:
-		bytesToRead = ser.readline()
-		if (bytesToRead!=""):
-			started=1
-			ii+=1
-			if (ii<10):
-				countStr=str("0%s" %ii)
-			else: 
-				countStr=ii
-			matrix=np.empty([20,20])
-			self.dlgLoadData.progressBar.setValue(0)
-			for x in range (0,20):
-				self.dlgLoadData.deviceStatus.setText("Loading data: Grid %s\tLine%s" %(ii,(x+1)))
-				line=""
-				for y in range (0,20):
-					
-					if (x==0 and y==0):
-						dataline=str(bytesToRead)
-					else:
-						dataline=str(ser.readline())
-					metadataline=str(ser.readline())
-					if ("4095" in dataline):  
-						value="0"
-					elif ("4094" in dataline):
-						value="0.01"
-					else:
-						if ('11' in metadataline):
-							value=int(dataline.strip())*10
-						else:
-							value=int(dataline.strip())
-						value=value/float(255)
-						value= round(value, 2)#convert to resistance values
-					if (x%2!=0):#Zigzag mode
-						matrix[19-y][x]=value
-					else:
-						matrix[y][x]=value
-				self.dlgLoadData.progressBar.setValue(5*(x+1))
-
-		#### Writing file. Checking whether the file already exists ####
-			fname='%s\grid_%s.csv' %(pathCsv,countStr)
-			if (os.path.isfile(fname) and overwrite=="ask"):
-				while True:
-					overwrite=raw_input('\nGrid already downloaded. Overwite?\n YA:Yes for all\n Y:Yes\n N: Not this one\n NA: Only add new grids\n').lower()
-					if (overwrite=="y" or overwrite=="ya"):
-						fileout= open(fname, 'wb')
-						fileout.write(datafiltered)
-						fileout.close()
-						sys.stdout.write(" Existed (Overwritten)")
-						break
-					elif (overwrite=="n" or overwrite=="na"):
-						sys.stdout.write(" Existed (Not Overwritten)")
-						break
-				if (overwrite=="y" or overwrite=="n"):
-					overwrite="ask"
-			elif (os.path.isfile(fname) and overwrite=="ya"):
-				fileout= open(fname, 'wb')
-				fileout.write(datafiltered)
-				fileout.close()
-				sys.stdout.write(" Existed (Overwritten)")
-			elif (os.path.isfile(fname) and overwrite=="na"):
-				sys.stdout.write(" File already exists. Not overwritten.")
-			else:
-				np.savetxt(fname, matrix, delimiter=",", fmt='%.2f')
-				sys.stdout.write(" Done")
-			sys.stdout.write("\n")
-			sys.stdout.flush()
-		if (started==1 and bytesToRead==''):
-			self.dlgLoadData.outButton.setText("Finished")
-			break
-	
+			
     def select_output(self):
-	foldername = QFileDialog.getExistingDirectory(self.dlgImportData, "Select output directory ","")
-	self.dlgImportData.lineEdit.setText(foldername)
+		foldername = QFileDialog.getExistingDirectory(self.dlgImportData, "Select output directory ","")
+		self.dlgImportData.lineEdit.setText(foldername)
 		
+    def downloadRM85(self):
+		import serial
+		
+		rows=20
+		cols=20
+		self.dlgImportData.status.setText("Ready. Press <<Dump>> on device.")
+		try:
+			ser = serial.Serial(self.dlgImportData.com.currentText(), int(self.dlgImportData.baud.currentText()), timeout=1) #Tried with and without the last 3 parameters, and also at 1Mbps, same happens.
+			
+			ser.flushInput()
+			ser.flushOutput()
+		except:
+			self.dlgImportData.status.setText("Error: check connection.")
+		else:
+			started = 0
+			ii=int(self.dlgImportData.firstGrid.value())-1
+			data_raw=""
+			mode= self.dlgImportData.mode.currentIndex()
+			while True:
+				bytesToRead = ser.readline()
+				if (bytesToRead!=""):
+					print("started")
+					self.dlgImportData.status.setText("Loading...")
+					started=1
+					ii+=1
+					if (ii<10):
+						countStr=str("0%s" %ii)
+					else: 
+						countStr=ii
+					
+					matrix1=np.empty([rows,cols])
+					if mode==1:
+						matrix50=np.empty([rows,2*cols])
+						samplesPerPoints=3
+					if mode ==0:
+						samplesPerPoints=1
+					self.dlgImportData.progressBar.setValue(0)
+					
+					for x in range (0,cols):
+						line=""
+						self.dlgImportData.status.setText("Loading... Grid %s - Line %s - mode %s" %(ii, x+1, mode))
+						for y in range (0,rows):
+							for pt in range (0,samplesPerPoints):
+								while True:
+									if (x==0 and y==0 and pt==0):
+										line=str(bytesToRead)
+									else:
+										line=str(ser.readline())
+
+									reading=str(ser.readline())
+									if "01" in reading:
+										gain=1
+									elif "11" in reading:
+										gain=10
+									elif "21" in reading:
+										gain=100
+									break
+								if ("4095" in line):  
+									value="0"
+								elif ("4094" in line):
+									value="0.01"
+								else:
+									value=int(line.strip())
+									value=value/(2*float(gain))
+									value= round(value, 3)#convert to resistance values
+								if (x%2!=0):#Zigzag mode
+									if (pt==0):
+										matrix1[19-y][x]=value
+									elif(pt==1):
+										matrix50[19-y][2*x+1]=value
+									elif(pt==2):
+										matrix50[19-y][2*x]=value
+								else:
+									if (pt==0):
+										matrix1[y][x]=value
+									elif(pt==1):
+										matrix50[y][2*x]=value
+									elif(pt==2):
+										matrix50[y][2*x+1]=value
+							self.dlgImportData.progressBar.setValue((100/cols)*(x+1))
+
+				#### Writing file. Checking whether the file already exists ####
+					fname1='%s\grid1_%s.csv' %(self.downloadOutput,countStr)
+					np.savetxt(fname1, matrix1, delimiter=",", fmt='%.2f')
+					if mode=="3":
+						fname50='%s\grid50_%s.csv' %(self.downloadOutput,countStr)
+						np.savetxt(fname50, matrix50, delimiter=",", fmt='%.2f')
+
+				if (started==1 and bytesToRead==''):
+					ser.close()
+					del ser
+					self.dlgImportData.status.setText("Done")
+					self.dlgImportData.buttonBox.clicked.connect(self.dlgImportData.close)
+					self.dlgImportData.buttonBox.accepted.connect(self.dlgImportData.close)
+					self.dlgImportData.buttonBox.rejected.connect(self.dlgImportData.close)
+					break
+	
     def acceptImport(self):
-	self.refreshDevice()
 	if (os.path.isdir(self.dlgImportData.lineEdit.text())):
 		self.dlgImportData.warning.setText("Valid directory.")
 		self.downloadOutput=self.dlgImportData.lineEdit.text()
 		self.init=int(self.dlgImportData.firstGrid.value())
-		if (self.portCom!=""):
-			self.dlgImportData.close()
-			self.dlgLoadData.show()
-			time.sleep(1)
-			self.downloadRM85(self.portCom,self.downloadOutput,self.init)
+		if (self.dlgImportData.com.currentText()!=""):
+			self.downloadRM85()
 	else: 
 		self.dlgImportData.warning.setText("Warning: directory is not valid.")
 		
 		
     def runImport(self):
-	self.portCom=""
-	self.refreshDevice()
-	self.dlgImportData.warning.setText("")
-	self.dlgImportData.lineEdit.setText("")
-	self.dlgImportData.refreshBtn.clicked.connect(self.refreshDevice)
-	self.dlgImportData.selectFolderBtn.clicked.connect(self.select_output)
-        self.dlgImportData.show()
-	
-	
-	self.dlgImportData.buttonBox.clicked.connect(self.acceptImport)
-	self.dlgImportData.buttonBox.accepted.connect(self.acceptImport)
-	self.dlgImportData.buttonBox.rejected.connect(self.dlgImportData.close)
+		
+		self.dlgImportData.warning.setText("")
+		self.dlgImportData.lineEdit.setText(self.downloadOutput)
+		self.dlgImportData.selectFolderBtn.clicked.connect(self.select_output)
+
+		self.dlgImportData.show()
+		
+		self.dlgImportData.buttonBox.clicked.connect(self.acceptImport)
+		self.dlgImportData.buttonBox.accepted.connect(self.acceptImport)
+		self.dlgImportData.buttonBox.rejected.connect(self.dlgImportData.close)
 	
     def runAssemble(self):
         self.dlgImportData.show()
